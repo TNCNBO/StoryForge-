@@ -6,6 +6,74 @@ import { deepseekClient } from '../services/deepseek.js'
 const router = Router()
 const prisma = new PrismaClient()
 
+// Helper: Safe JSON parse with fallback
+function safeParseJson<T>(jsonString: string | null, fallback: T): T {
+  if (!jsonString) return fallback
+  try {
+    return JSON.parse(jsonString)
+  } catch {
+    return fallback
+  }
+}
+
+// Helper: Extract JSON from AI response (handles markdown code blocks)
+function extractJsonFromResponse(content: string): any {
+  const trimmed = content.trim()
+  // Try direct parse first
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    // Try to extract from markdown code block
+    const match = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/) ||
+                  trimmed.match(/\{[\s\S]*\}/)
+    if (match) {
+      try {
+        return JSON.parse(match[1] || match[0])
+      } catch {
+        throw new Error('无法解析AI返回的JSON格式')
+      }
+    }
+    throw new Error('AI返回内容不是有效的JSON格式')
+  }
+}
+
+// Helper: Build extended context window
+function buildContext(previousChapters: any[], currentChapter: number): string {
+  // Get up to 10 previous chapters with 3000 chars each
+  const relevant = previousChapters
+    .filter(c => c.order < currentChapter && c.content)
+    .slice(-10)
+
+  if (relevant.length === 0) return '（无前文，这是第一章）'
+
+  return relevant
+    .map(c => `=== 第${c.order}章 ${c.title} ===\n${c.content.slice(-3000)}`)
+    .join('\n\n')
+}
+
+// Helper: Validate outline data
+function validateOutlineData(data: any): { valid: boolean; error?: string } {
+  if (!data.title || typeof data.title !== 'string') {
+    return { valid: false, error: '缺少小说标题' }
+  }
+  if (!data.mainArc || typeof data.mainArc !== 'string') {
+    return { valid: false, error: '缺少主线剧情概述' }
+  }
+  if (!Array.isArray(data.plotPoints)) {
+    return { valid: false, error: '缺少情节要点列表' }
+  }
+  if (data.plotPoints.length < 30) {
+    return { valid: false, error: `情节要点数量不足，当前${data.plotPoints.length}章，需要至少30章` }
+  }
+  // Validate total word count
+  const totalWords = data.plotPoints.reduce((sum: number, pt: any) =>
+    sum + (pt.expectedWordCount || 3500), 0)
+  if (totalWords < 2000) {
+    return { valid: false, error: `预估总字数${totalWords}不足，要求≥2000字` }
+  }
+  return { valid: true }
+}
+
 router.use(authMiddleware)
 
 // 生成世界观
@@ -55,13 +123,29 @@ ${description || '请根据类型自动生成'}
       { temperature: 0.7, max_tokens: 4096 }
     )
 
-    const worldSetting = JSON.parse(content)
+    const worldSetting = extractJsonFromResponse(content)
 
     const result = await prisma.worldSetting.upsert({
       where: { novelId: novel.id },
-      update: worldSetting,
+      update: {
+        name: worldSetting.name || '未命名世界观',
+        genre: worldSetting.genre || genre || '玄幻奇幻',
+        description: worldSetting.description || '',
+        timeSetting: worldSetting.timeSetting || '',
+        locationSetting: worldSetting.locationSetting || '',
+        socialStructure: worldSetting.socialStructure || '',
+        culturalRules: worldSetting.culturalRules || '',
+        magicOrTechSystem: worldSetting.magicOrTechSystem || '',
+      },
       create: {
-        ...worldSetting,
+        name: worldSetting.name || '未命名世界观',
+        genre: worldSetting.genre || genre || '玄幻奇幻',
+        description: worldSetting.description || '',
+        timeSetting: worldSetting.timeSetting || '',
+        locationSetting: worldSetting.locationSetting || '',
+        socialStructure: worldSetting.socialStructure || '',
+        culturalRules: worldSetting.culturalRules || '',
+        magicOrTechSystem: worldSetting.magicOrTechSystem || '',
         novelId: novel.id,
       },
     })
@@ -168,10 +252,16 @@ ${charactersDesc || '（暂无角色设定，请根据类型自动设计）'}
 
     const content = await deepseekClient.chat(
       [{ role: 'user', content: prompt }],
-      { temperature: 0.7, max_tokens: 8192 }
+      { temperature: 0.7, max_tokens: 16384 }
     )
 
-    const outlineData = JSON.parse(content)
+    const outlineData = extractJsonFromResponse(content)
+
+    // Validate outline data
+    const validation = validateOutlineData(outlineData)
+    if (!validation.valid) {
+      return res.status(400).json({ message: validation.error })
+    }
 
     const result = await prisma.outline.upsert({
       where: { novelId: novel.id },
@@ -181,7 +271,7 @@ ${charactersDesc || '（暂无角色设定，请根据类型自动设计）'}
         subArcs: JSON.stringify(outlineData.subArcs || []),
         volumeStructure: JSON.stringify(outlineData.volumeStructure || []),
         plotPoints: JSON.stringify(outlineData.plotPoints || []),
-        totalChapters: outlineData.totalChapters || targetChapters,
+        totalChapters: outlineData.plotPoints?.length || targetChapters,
       },
       create: {
         title: outlineData.title,
@@ -189,7 +279,7 @@ ${charactersDesc || '（暂无角色设定，请根据类型自动设计）'}
         subArcs: JSON.stringify(outlineData.subArcs || []),
         volumeStructure: JSON.stringify(outlineData.volumeStructure || []),
         plotPoints: JSON.stringify(outlineData.plotPoints || []),
-        totalChapters: outlineData.totalChapters || targetChapters,
+        totalChapters: outlineData.plotPoints?.length || targetChapters,
         novelId: novel.id,
       },
     })
@@ -255,7 +345,7 @@ router.post('/chapters/:chapterId/generate', async (req: AuthRequest, res) => {
       return res.status(400).json({ message: '请先生成大纲' })
     }
 
-    const plotPoints = JSON.parse(outline.plotPoints)
+    const plotPoints = safeParseJson(outline.plotPoints, [])
     const currentPlot = plotPoints.find(
       (p: any) => p.chapterNumber === chapter.order
     )
@@ -264,17 +354,8 @@ router.post('/chapters/:chapterId/generate', async (req: AuthRequest, res) => {
       return res.status(400).json({ message: '找不到对应的大纲章节' })
     }
 
-    // 构建前文上下文
-    const previousChapters = chapter.novel.chapters
-      .filter(c => c.order < chapter.order && c.content)
-      .slice(-3)
-
-    let context = ''
-    if (previousChapters.length > 0) {
-      context = previousChapters
-        .map(c => `=== 第${c.order}章 ${c.title} ===\n${c.content.slice(-2000)}`)
-        .join('\n\n')
-    }
+    // 构建扩展上下文窗口（前10章×3000字）
+    const context = buildContext(chapter.novel.chapters, chapter.order)
 
     const charactersDesc = chapter.novel.characters
       .map(c => `- ${c.name}: ${c.personality || c.description || '待补充'}`)
@@ -314,9 +395,16 @@ ${context || '（无前文，这是第一章）'}
     const startTime = Date.now()
     const content = await deepseekClient.chat(
       [{ role: 'user', content: prompt }],
-      { temperature: 0.75, max_tokens: 8192 }
+      { temperature: 0.75, max_tokens: 16384 }
     )
     const generationTime = Date.now() - startTime
+
+    // Validate content length
+    if (content.length < 2500) {
+      return res.status(400).json({
+        message: `生成内容过少（${content.length}字），请重试`
+      })
+    }
 
     // 更新章节内容
     const updated = await prisma.chapter.update({
@@ -364,9 +452,11 @@ router.post('/novels/:novelId/chapters/batch-generate', async (req: AuthRequest,
       return res.status(400).json({ message: '请先生成大纲' })
     }
 
-    const plotPoints = JSON.parse(novel.outline.plotPoints)
+    const plotPoints = safeParseJson(novel.outline.plotPoints, [])
     const generatedChapters = []
+    const failedChapters = []
     const chaptersMap = new Map(novel.chapters.map(c => [c.order, c]))
+    const totalChapters = endChapter - startChapter + 1
 
     for (let i = startChapter; i <= endChapter; i++) {
       const chapter = chaptersMap.get(i)
@@ -375,17 +465,8 @@ router.post('/novels/:novelId/chapters/batch-generate', async (req: AuthRequest,
       const currentPlot = plotPoints.find((p: any) => p.chapterNumber === i)
       if (!currentPlot) continue
 
-      // 获取前文上下文
-      const previousChapters = novel.chapters
-        .filter(c => c.order < i && c.content)
-        .slice(-3)
-
-      let context = ''
-      if (previousChapters.length > 0) {
-        context = previousChapters
-          .map(c => `=== 第${c.order}章 ${c.title} ===\n${c.content.slice(-2000)}`)
-          .join('\n\n')
-      }
+      // 获取扩展上下文（前10章×3000字）
+      const context = buildContext(novel.chapters, i)
 
       const charactersDesc = novel.characters
         .map(c => `- ${c.name}: ${c.personality || c.description || '待补充'}`)
@@ -409,7 +490,7 @@ router.post('/novels/:novelId/chapters/batch-generate', async (req: AuthRequest,
 ${charactersDesc}
 
 ## 前文上下文
-${context || '（无前文，这是第一章）'}
+${context}
 
 ## 写作要求
 1. 严格遵循大纲设定
@@ -422,10 +503,17 @@ ${context || '（无前文，这是第一章）'}
 请直接输出正文内容。`
 
       try {
+        const startTime = Date.now()
         const content = await deepseekClient.chat(
           [{ role: 'user', content: prompt }],
-          { temperature: 0.75, max_tokens: 8192 }
+          { temperature: 0.75, max_tokens: 16384 }
         )
+        const generationTime = Date.now() - startTime
+
+        if (content.length < 2500) {
+          failedChapters.push({ chapter: i, reason: `内容过少（${content.length}字）` })
+          continue
+        }
 
         const updated = await prisma.chapter.update({
           where: { id: chapter.id },
@@ -436,14 +524,18 @@ ${context || '（无前文，这是第一章）'}
           },
         })
 
-        generatedChapters.push(updated)
+        generatedChapters.push({ ...updated, generationTime: `${generationTime}ms` })
       } catch (err) {
         console.error(`Failed to generate chapter ${i}:`, err)
+        failedChapters.push({ chapter: i, reason: 'API调用失败' })
       }
     }
 
     res.json({
-      count: generatedChapters.length,
+      total: totalChapters,
+      success: generatedChapters.length,
+      failed: failedChapters.length,
+      failedChapters,
       chapters: generatedChapters,
     })
   } catch (error) {
@@ -469,9 +561,9 @@ router.get('/novels/:novelId/outline/export', async (req: AuthRequest, res) => {
     }
 
     const outline = novel.outline
-    const plotPoints = outline.plotPoints ? JSON.parse(outline.plotPoints) : []
-    const subArcs = outline.subArcs ? JSON.parse(outline.subArcs) : []
-    const volumeStructure = outline.volumeStructure ? JSON.parse(outline.volumeStructure) : []
+    const plotPoints = safeParseJson(outline.plotPoints, [])
+    const subArcs = safeParseJson(outline.subArcs, [])
+    const volumeStructure = safeParseJson(outline.volumeStructure, [])
 
     let md = `# ${outline.title}\n\n`
     md += `## 总览\n`
@@ -578,16 +670,16 @@ ${description ? `- 用户描述: ${description}` : ''}
       { temperature: 0.8, max_tokens: 4096 }
     )
 
-    const characterData = JSON.parse(content)
+    const characterData = extractJsonFromResponse(content)
 
     const character = await prisma.character.create({
       data: {
-        name: characterData.name,
+        name: characterData.name || '未命名角色',
         role: roleType,
-        description: characterData.description,
-        personality: characterData.personality,
-        appearance: characterData.appearance,
-        background: characterData.background,
+        description: characterData.description || '',
+        personality: characterData.personality || '',
+        appearance: characterData.appearance || '',
+        background: characterData.background || '',
         novelId: novel.id,
       },
     })
@@ -660,7 +752,7 @@ ${worldDesc}
       { temperature: 0.8, max_tokens: 8192 }
     )
 
-    let charactersData = JSON.parse(content)
+    let charactersData = extractJsonFromResponse(content)
 
     // Ensure it's an array
     if (!Array.isArray(charactersData)) {
@@ -672,12 +764,12 @@ ${worldDesc}
     for (const charData of charactersData) {
       const character = await prisma.character.create({
         data: {
-          name: charData.name,
-          role: charData.role,
-          description: charData.description,
-          personality: charData.personality,
-          appearance: charData.appearance,
-          background: charData.background,
+          name: charData.name || '未命名角色',
+          role: charData.role || 'supporting',
+          description: charData.description || '',
+          personality: charData.personality || '',
+          appearance: charData.appearance || '',
+          background: charData.background || '',
           novelId: novel.id,
         },
       })

@@ -20,37 +20,53 @@ export class DeepSeekClient {
   private apiKey: string
   private apiUrl: string
   private model: string
+  private timeout: number
 
-  constructor(apiKey?: string) {
+  constructor(apiKey?: string, timeout: number = 120000) {
     this.apiKey = apiKey || DEEPSEEK_API_KEY
     this.apiUrl = DEEPSEEK_API_URL
     this.model = MODEL_NAME
+    this.timeout = timeout
   }
 
   async chat(messages: ChatMessage[], options: ChatOptions = {}): Promise<string> {
-    const { temperature = 0.7, max_tokens = 4096 } = options
+    const { temperature = 0.7, max_tokens = 16384 } = options
 
-    const response = await fetch(`${this.apiUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: this.model,
-        messages,
-        temperature,
-        max_tokens,
-      }),
-    })
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout)
 
-    if (!response.ok) {
-      const error = await response.text()
-      throw new Error(`DeepSeek API error: ${response.status} - ${error}`)
+    try {
+      const response = await fetch(`${this.apiUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: this.model,
+          messages,
+          temperature,
+          max_tokens,
+        }),
+        signal: controller.signal,
+      })
+
+      clearTimeout(timeoutId)
+
+      if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`DeepSeek API error: ${response.status} - ${error}`)
+      }
+
+      const data = await response.json()
+      return data.choices[0].message.content
+    } catch (error) {
+      clearTimeout(timeoutId)
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error(`DeepSeek API timeout after ${this.timeout}ms`)
+      }
+      throw error
     }
-
-    const data = await response.json()
-    return data.choices[0].message.content
   }
 }
 
