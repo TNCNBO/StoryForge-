@@ -507,4 +507,334 @@ router.get('/novels/:novelId/outline/export', async (req: AuthRequest, res) => {
   }
 })
 
+// ==================== 角色生成 (SHA-7) ====================
+
+// 生成单个角色
+router.post('/novels/:novelId/characters/generate', async (req: AuthRequest, res) => {
+  try {
+    const novel = await prisma.novel.findFirst({
+      where: { id: req.params.novelId },
+      include: {
+        project: { select: { userId: true } },
+        worldSetting: true,
+        characters: true,
+      },
+    })
+
+    if (!novel || novel.project.userId !== req.userId) {
+      return res.status(404).json({ message: '小说不存在' })
+    }
+
+    const { roleType, name, description } = req.body
+    // roleType: protagonist, antagonist, supporting
+
+    const existingChars = novel.characters.map(c => `- ${c.name}: ${c.description || '待补充'}`).join('\n')
+
+    const worldDesc = novel.worldSetting ? `
+- 时代背景: ${novel.worldSetting.timeSetting || '待补充'}
+- 社会结构: ${novel.worldSetting.socialStructure || '待补充'}
+- 文化规则: ${novel.worldSetting.culturalRules || '待补充'}
+${novel.worldSetting.magicOrTechSystem ? `- 力量体系: ${novel.worldSetting.magicOrTechSystem}` : ''}` : ''
+
+    const prompt = `你是一位专业的小说角色设计师。请为以下小说生成一个完整的角色设定。
+
+## 小说信息
+- 类型: ${novel.genre || '玄幻奇幻'}
+- 标题: ${novel.title}
+${worldDesc}
+
+## 已有角色（避免重复）
+${existingChars || '（暂无已有角色）'}
+
+## 用户需求
+- 角色定位: ${roleType === 'protagonist' ? '主角' : roleType === 'antagonist' ? '反派' : '配角'}
+${name ? `- 指定名称: ${name}` : ''}
+${description ? `- 用户描述: ${description}` : ''}
+
+## 角色生成要求
+请生成一个性格鲜明、背景立体、有成长弧线的角色。包含：
+1. 姓名（符合小说风格）
+2. 外貌特征
+3. 性格特点（详细，3-5个关键词）
+4. 背景故事（至少100字）
+5. 核心动机/目标
+6. 与其他角色的潜在关系
+7. 如果是主角/反派，需要有明显的成长弧线
+
+请以JSON格式输出：
+{
+  "name": "角色姓名",
+  "role": "${roleType}",
+  "description": "角色简介（20字以内）",
+  "personality": "性格特点描述",
+  "appearance": "外貌特征描述",
+  "background": "背景故事",
+  "motivation": "核心动机/目标",
+  "relationships": "与其他角色的潜在关系"
+}`
+
+    const content = await deepseekClient.chat(
+      [{ role: 'user', content: prompt }],
+      { temperature: 0.8, max_tokens: 4096 }
+    )
+
+    const characterData = JSON.parse(content)
+
+    const character = await prisma.character.create({
+      data: {
+        name: characterData.name,
+        role: roleType,
+        description: characterData.description,
+        personality: characterData.personality,
+        appearance: characterData.appearance,
+        background: characterData.background,
+        novelId: novel.id,
+      },
+    })
+
+    res.json(character)
+  } catch (error) {
+    console.error('Generate character error:', error)
+    res.status(500).json({ message: '生成失败，请重试' })
+  }
+})
+
+// 批量生成角色
+router.post('/novels/:novelId/characters/batch-generate', async (req: AuthRequest, res) => {
+  try {
+    const novel = await prisma.novel.findFirst({
+      where: { id: req.params.novelId },
+      include: {
+        project: { select: { userId: true } },
+        worldSetting: true,
+        characters: true,
+      },
+    })
+
+    if (!novel || novel.project.userId !== req.userId) {
+      return res.status(404).json({ message: '小说不存在' })
+    }
+
+    const { protagonistCount = 1, antagonistCount = 1, supportingCount = 3 } = req.body
+
+    const worldDesc = novel.worldSetting ? `
+- 时代背景: ${novel.worldSetting.timeSetting || '待补充'}
+- 社会结构: ${novel.worldSetting.socialStructure || '待补充'}
+- 文化规则: ${novel.worldSetting.culturalRules || '待补充'}
+${novel.worldSetting.magicOrTechSystem ? `- 力量体系: ${novel.worldSetting.magicOrTechSystem}` : ''}` : ''
+
+    const prompt = `你是一位专业的小说角色设计师。请为以下小说生成一套完整的角色体系。
+
+## 小说信息
+- 类型: ${novel.genre || '玄幻奇幻'}
+- 标题: ${novel.title}
+${worldDesc}
+
+## 角色需求
+- 主角数量: ${protagonistCount}
+- 反派数量: ${antagonistCount}
+- 配角数量: ${supportingCount}
+
+## 生成要求
+1. 主角需要有明确的成长弧线和鲜明的个人特质
+2. 反派需要有合理的动机，不能是单纯的"坏人"
+3. 配角需要有自己的个性和存在的意义
+4. 所有角色之间需要有潜在的关系网络
+5. 角色设定要符合小说的世界观
+
+请为每个角色生成详细的设定，输出JSON数组格式：
+[
+  {
+    "name": "角色姓名",
+    "role": "protagonist|antagonist|supporting",
+    "description": "角色简介（20字以内）",
+    "personality": "性格特点描述",
+    "appearance": "外貌特征描述",
+    "background": "背景故事",
+    "motivation": "核心动机/目标"
+  }
+]`
+
+    const content = await deepseekClient.chat(
+      [{ role: 'user', content: prompt }],
+      { temperature: 0.8, max_tokens: 8192 }
+    )
+
+    let charactersData = JSON.parse(content)
+
+    // Ensure it's an array
+    if (!Array.isArray(charactersData)) {
+      charactersData = [charactersData]
+    }
+
+    // Create characters in database
+    const createdCharacters = []
+    for (const charData of charactersData) {
+      const character = await prisma.character.create({
+        data: {
+          name: charData.name,
+          role: charData.role,
+          description: charData.description,
+          personality: charData.personality,
+          appearance: charData.appearance,
+          background: charData.background,
+          novelId: novel.id,
+        },
+      })
+      createdCharacters.push(character)
+    }
+
+    res.json({ count: createdCharacters.length, characters: createdCharacters })
+  } catch (error) {
+    console.error('Batch generate characters error:', error)
+    res.status(500).json({ message: '批量生成失败，请重试' })
+  }
+})
+
+// ==================== 场景/对话优化 (SHA-10) ====================
+
+// 优化场景描写
+router.post('/optimize/scene', async (req: AuthRequest, res) => {
+  try {
+    const { content, context, target } = req.body
+    // target: atmosphere, detail, both
+
+    if (!content) {
+      return res.status(400).json({ message: '请提供需要优化的内容' })
+    }
+
+    const prompt = `你是一位专业的小说文笔润色师。请对以下场景描写进行优化。
+
+## 原文
+${content}
+
+${context ? `## 上下文\n${context}` : ''}
+
+## 优化目标
+${target === 'atmosphere' ? '增强氛围感和情绪表达' : target === 'detail' ? '增加场景细节和画面感' : '同时增强氛围感和场景细节'}
+
+## 优化要求
+1. 保持原文的情节和人物行为不变
+2. 增强视觉、听觉、嗅觉、触觉等感官描写
+3. 提升文字的画面感和沉浸感
+4. 氛围描写要与情节情绪匹配
+5. 不要添加新的情节元素
+6. 优化后的内容应保持在500-2000字
+
+请直接输出优化后的内容，不要添加任何说明。`
+
+    const optimized = await deepseekClient.chat(
+      [{ role: 'user', content: prompt }],
+      { temperature: 0.7, max_tokens: 4096 }
+    )
+
+    res.json({
+      original: content,
+      optimized,
+      type: 'scene',
+      improvement: optimized.length > content.length ? 'enhanced' : 'similar'
+    })
+  } catch (error) {
+    console.error('Optimize scene error:', error)
+    res.status(500).json({ message: '优化失败，请重试' })
+  }
+})
+
+// 优化对话
+router.post('/optimize/dialogue', async (req: AuthRequest, res) => {
+  try {
+    const { content, characterContext } = req.body
+
+    if (!content) {
+      return res.status(400).json({ message: '请提供需要优化的对话' })
+    }
+
+    const prompt = `你是一位专业的小说对话设计师。请对以下对话进行润色优化。
+
+## 原文对话
+${content}
+
+${characterContext ? `## 角色背景\n${characterContext}` : ''}
+
+## 优化要求
+1. 保持原对话的核心意思不变
+2. 让对话更符合角色的性格和说话习惯
+3. 增强对话的自然性和情感表达
+4. 适当添加动作神态描写（用括号）
+5. 对话要有潜台词和张力
+6. 避免对话过于直白或过于文艺
+
+## 输出格式
+保持对话原文结构，只在需要的地方添加动作神态描写。输出优化后的完整内容。`
+
+    const optimized = await deepseekClient.chat(
+      [{ role: 'user', content: prompt }],
+      { temperature: 0.7, max_tokens: 4096 }
+    )
+
+    res.json({
+      original: content,
+      optimized,
+      type: 'dialogue'
+    })
+  } catch (error) {
+    console.error('Optimize dialogue error:', error)
+    res.status(500).json({ message: '优化失败，请重试' })
+  }
+})
+
+// 优化文风/整体润色
+router.post('/optimize/style', async (req: AuthRequest, res) => {
+  try {
+    const { content, style, targetWordCount } = req.body
+    // style: vivid, concise, literary, modern
+
+    if (!content) {
+      return res.status(400).json({ message: '请提供需要优化的内容' })
+    }
+
+    const styleMap: Record<string, string> = {
+      vivid: '增强画面感和感官描写，让文字更加生动鲜活',
+      concise: '精简冗余表达，保持核心内容的同时让文字更加凝练',
+      literary: '提升文学性，使用更优雅的表达方式',
+      modern: '使用更现代的表达方式，贴近当代读者习惯'
+    }
+
+    const prompt = `你是一位专业的小说文风编辑。请对以下内容进行文风优化。
+
+## 原文
+${content}
+
+## 目标文风
+${styleMap[style] || styleMap.vivid}
+
+${targetWordCount ? `## 目标字数\n${targetWordCount}字左右` : ''}
+
+## 优化要求
+1. 保持原文的情节、人物和核心信息不变
+2. 调整文风使其符合目标风格
+3. 保持文字的节奏感和可读性
+4. 不要添加新的情节或人物
+5. ${targetWordCount ? `输出字数控制在${targetWordCount}字左右` : '保持原文长度或适当精简'}
+
+请直接输出优化后的内容，不要添加任何说明。`
+
+    const optimized = await deepseekClient.chat(
+      [{ role: 'user', content: prompt }],
+      { temperature: 0.7, max_tokens: 8192 }
+    )
+
+    res.json({
+      original: content,
+      optimized,
+      type: 'style',
+      style,
+      wordCount: optimized.length
+    })
+  } catch (error) {
+    console.error('Optimize style error:', error)
+    res.status(500).json({ message: '优化失败，请重试' })
+  }
+})
+
 export default router
