@@ -74,14 +74,17 @@ function buildContext(previousChapters: any[], currentChapter: number): string {
 
 // Helper: Validate outline data
 function validateOutlineData(data: any): { valid: boolean; error?: string } {
+  if (!data || typeof data !== 'object') {
+    return { valid: false, error: 'AI返回数据格式无效' }
+  }
   if (!data.title || typeof data.title !== 'string') {
     return { valid: false, error: '缺少小说标题' }
   }
   if (!data.mainArc || typeof data.mainArc !== 'string') {
     return { valid: false, error: '缺少主线剧情概述' }
   }
-  if (!Array.isArray(data.plotPoints)) {
-    return { valid: false, error: '缺少情节要点列表' }
+  if (!Array.isArray(data.plotPoints) || data.plotPoints.length === 0) {
+    return { valid: false, error: '缺少情节要点列表或列表为空' }
   }
   if (data.plotPoints.length < 30) {
     return { valid: false, error: `情节要点数量不足，当前${data.plotPoints.length}章，需要至少30章` }
@@ -174,7 +177,8 @@ ${description || '请根据类型自动生成'}
     res.json(result)
   } catch (error) {
     console.error('Generate world setting error:', error)
-    res.status(500).json({ message: '生成失败，请重试' })
+    const message = error instanceof Error ? error.message : '未知错误'
+    res.status(500).json({ message: `生成失败: ${message}` })
   }
 })
 
@@ -308,7 +312,8 @@ ${charactersDesc || '（暂无角色设定，请根据类型自动设计）'}
     res.json(result)
   } catch (error) {
     console.error('Generate outline error:', error)
-    res.status(500).json({ message: '生成失败，请重试' })
+    const message = error instanceof Error ? error.message : '未知错误'
+    res.status(500).json({ message: `生成失败: ${message}` })
   }
 })
 
