@@ -27,8 +27,8 @@
 ### 1.4 AI 集成
 | 选项 | 推荐 | 理由 |
 |------|------|------|
-| AI Provider | **Claude API** ( Anthropic ) | 长上下文，创意写作能力强 |
-| 备选 | **OpenAI GPT-4o** | 成熟生态 |
+| AI Provider | **DeepSeek API** | 成本低，推理能力强 |
+| 备选 | **Claude API** ( Anthropic ) | 长上下文，创意写作能力强 |
 
 ---
 
@@ -198,7 +198,7 @@ StoryForge/
 │   │   ├── prisma.ts
 │   │   ├── auth.ts
 │   │   ├── ai/
-│   │   │   ├── claude.ts
+│   │   │   ├── deepseek.ts
 │   │   │   └── prompts/
 │   │   └── utils.ts
 │   └── types/
@@ -219,7 +219,7 @@ StoryForge/
 |------|------|------|
 | **Vercel** | 前端 + API | 免费 ( Hobby ) |
 | **Supabase** | PostgreSQL + Auth | 免费 ( Pro: $25/月 ) |
-| **Claude API** | AI 生成 | 按 token 计费 |
+| **DeepSeek API** | AI 生成 | 按 token 计费（低成本） |
 
 ### 5.2 备选方案
 - **Railway** + PostgreSQL plugin
@@ -244,7 +244,7 @@ StoryForge/
 - [ ] 用户可注册、登录
 - [ ] 可创建/编辑/删除项目
 - [ ] 可创建/编辑/删除章节
-- [ ] 可调用 Claude API 生成内容
+- [ ] 可调用 DeepSeek API 生成内容
 - [ ] 数据库 Schema 正确创建
 
 ---
@@ -252,6 +252,6 @@ StoryForge/
 ## 8. 后续协作建议
 
 在 SHA-5 完成后，前端开发需要确认：
-1. **AI API 集成方案**：选择 Claude 还是 GPT，API Key 管理方式
+1. **AI API 集成方案**：已选定 DeepSeek，API Key 已配置，集成方式确认
 2. **导出格式**：EPUB / PDF / Word，需要哪些库
 3. **实时协作**：是否需要多人协作编辑
