@@ -43,6 +43,44 @@ POST /api/novels/:novelId/world-setting
 GET /api/novels/:novelId/world-setting
 ```
 
+#### 获取项目的所有世界观
+```
+GET /api/projects/:projectId/world-settings
+```
+
+#### 获取单个世界观
+```
+GET /api/world-settings/:id
+```
+
+#### 更新世界观
+```
+PUT /api/world-settings/:id
+```
+**Body:**
+```json
+{
+  "name": "世界观名称（可选）",
+  "genre": "类型（可选）",
+  "description": "描述（可选）",
+  "timeSetting": "时代背景",
+  "locationSetting": "地理环境",
+  "socialStructure": "社会结构",
+  "culturalRules": "文化规则",
+  "magicOrTechSystem": "力量体系"
+}
+```
+
+#### 删除世界观
+```
+DELETE /api/world-settings/:id
+```
+
+#### AI重新生成世界观
+```
+POST /api/world-settings/:id/generate
+```
+
 ---
 
 ### 角色生成 (SHA-7)
