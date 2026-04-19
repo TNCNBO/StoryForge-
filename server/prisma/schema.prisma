@@ -37,6 +37,8 @@ model Novel {
   project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
   characters Character[]
   chapters   Chapter[]
+  worldSetting WorldSetting?
+  outline     Outline?
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 }
@@ -65,4 +67,34 @@ model Chapter {
   novel    Novel    @relation(fields: [novelId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model WorldSetting {
+  id               String   @id @default(uuid())
+  name             String
+  genre            String
+  description      String
+  timeSetting      String?
+  locationSetting  String?
+  socialStructure  String?
+  culturalRules    String?
+  magicOrTechSystem String?
+  novelId          String   @unique
+  novel            Novel    @relation(fields: [novelId], references: [id], onDelete: Cascade)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model Outline {
+  id              String   @id @default(uuid())
+  title           String
+  mainArc         String?
+  subArcs         String?  // JSON array stored as string
+  volumeStructure String?  // JSON array stored as string
+  plotPoints      String?  // JSON array stored as string
+  totalChapters   Int      @default(30)
+  novelId         String   @unique
+  novel           Novel    @relation(fields: [novelId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }

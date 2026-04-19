@@ -6,6 +6,7 @@ import projectRoutes from './routes/projects.js'
 import novelRoutes from './routes/novels.js'
 import characterRoutes from './routes/characters.js'
 import chapterRoutes from './routes/chapters.js'
+import aiRoutes from './routes/ai.js'
 
 const app = express()
 
@@ -20,6 +21,7 @@ app.use('/api/projects', projectRoutes)
 app.use('/api', novelRoutes)
 app.use('/api', characterRoutes)
 app.use('/api', chapterRoutes)
+app.use('/api', aiRoutes)
 
 app.get('/api/health', (_, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() })
