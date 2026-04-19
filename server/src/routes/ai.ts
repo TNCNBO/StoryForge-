@@ -950,4 +950,186 @@ ${targetWordCount ? `## 目标字数\n${targetWordCount}字左右` : ''}
   }
 })
 
+// ==================== 世界观设定 CRUD (前端对接) ====================
+
+// 获取项目的所有世界观设定
+router.get('/projects/:projectId/world-settings', async (req: AuthRequest, res) => {
+  try {
+    const project = await prisma.project.findFirst({
+      where: { id: req.params.projectId, userId: req.userId },
+    })
+
+    if (!project) {
+      return res.status(404).json({ message: '项目不存在' })
+    }
+
+    const novels = await prisma.novel.findMany({
+      where: { projectId: project.id },
+      include: { worldSetting: true },
+    })
+
+    const worldSettings = novels
+      .filter(n => n.worldSetting)
+      .map(n => ({ ...n.worldSetting, novelTitle: n.title }))
+
+    res.json(worldSettings)
+  } catch (error) {
+    console.error('Get world settings error:', error)
+    res.status(500).json({ message: '服务器错误' })
+  }
+})
+
+// 获取单个世界观设定
+router.get('/world-settings/:id', async (req: AuthRequest, res) => {
+  try {
+    const worldSetting = await prisma.worldSetting.findUnique({
+      where: { id: req.params.id },
+      include: { novel: { include: { project: true } } },
+    })
+
+    if (!worldSetting || worldSetting.novel.project.userId !== req.userId) {
+      return res.status(404).json({ message: '世界观不存在' })
+    }
+
+    res.json({ ...worldSetting, novelTitle: worldSetting.novel.title })
+  } catch (error) {
+    console.error('Get world setting error:', error)
+    res.status(500).json({ message: '服务器错误' })
+  }
+})
+
+// 更新世界观设定
+router.put('/world-settings/:id', async (req: AuthRequest, res) => {
+  try {
+    const worldSetting = await prisma.worldSetting.findUnique({
+      where: { id: req.params.id },
+      include: { novel: { include: { project: true } } },
+    })
+
+    if (!worldSetting || worldSetting.novel.project.userId !== req.userId) {
+      return res.status(404).json({ message: '世界观不存在' })
+    }
+
+    const { name, genre, description, timeSetting, locationSetting, socialStructure, culturalRules, magicOrTechSystem } = req.body
+
+    const updated = await prisma.worldSetting.update({
+      where: { id: worldSetting.id },
+      data: {
+        name: name ?? worldSetting.name,
+        genre: genre ?? worldSetting.genre,
+        description: description ?? worldSetting.description,
+        timeSetting: timeSetting ?? worldSetting.timeSetting,
+        locationSetting: locationSetting ?? worldSetting.locationSetting,
+        socialStructure: socialStructure ?? worldSetting.socialStructure,
+        culturalRules: culturalRules ?? worldSetting.culturalRules,
+        magicOrTechSystem: magicOrTechSystem ?? worldSetting.magicOrTechSystem,
+      },
+    })
+
+    res.json(updated)
+  } catch (error) {
+    console.error('Update world setting error:', error)
+    res.status(500).json({ message: '更新失败' })
+  }
+})
+
+// 删除世界观设定
+router.delete('/world-settings/:id', async (req: AuthRequest, res) => {
+  try {
+    const worldSetting = await prisma.worldSetting.findUnique({
+      where: { id: req.params.id },
+      include: { novel: { include: { project: true } } },
+    })
+
+    if (!worldSetting || worldSetting.novel.project.userId !== req.userId) {
+      return res.status(404).json({ message: '世界观不存在' })
+    }
+
+    await prisma.worldSetting.delete({
+      where: { id: worldSetting.id },
+    })
+
+    res.status(204).send()
+  } catch (error) {
+    console.error('Delete world setting error:', error)
+    res.status(500).json({ message: '删除失败' })
+  }
+})
+
+// AI生成世界观内容（更新已有世界观）
+router.post('/world-settings/:id/generate', async (req: AuthRequest, res) => {
+  try {
+    const worldSetting = await prisma.worldSetting.findUnique({
+      where: { id: req.params.id },
+      include: { novel: { include: { project: true } } },
+    })
+
+    if (!worldSetting || worldSetting.novel.project.userId !== req.userId) {
+      return res.status(404).json({ message: '世界观不存在' })
+    }
+
+    const prompt = `你是一位专业的小说世界观设计师。请为以下类型的小说生成/更新世界观设定。
+
+## 小说类型
+${worldSetting.genre || '玄幻奇幻'}
+
+## 用户描述
+${worldSetting.description || '请根据类型自动生成'}
+
+## 已有世界观
+- 名称: ${worldSetting.name}
+- 时代背景: ${worldSetting.timeSetting || '待补充'}
+- 地理环境: ${worldSetting.locationSetting || '待补充'}
+- 社会结构: ${worldSetting.socialStructure || '待补充'}
+- 文化规则: ${worldSetting.culturalRules || '待补充'}
+${worldSetting.magicOrTechSystem ? `- 力量体系: ${worldSetting.magicOrTechSystem}` : ''}
+
+## 要求
+请生成完整的世界观设定，包含：
+1. 时代背景（时间设定）
+2. 地理环境（地点设定）
+3. 社会结构（阶级、组织、势力）
+4. 文化规则（风俗习惯、禁忌）
+5. 力量体系（如果有魔法或科技）
+
+请以JSON格式输出：
+{
+  "name": "世界观名称",
+  "genre": "类型",
+  "description": "整体描述",
+  "timeSetting": "时代背景",
+  "locationSetting": "地理环境",
+  "socialStructure": "社会结构",
+  "culturalRules": "文化规则",
+  "magicOrTechSystem": "力量体系（可为空）"
+}`
+
+    const content = await deepseekClient.chat(
+      [{ role: 'user', content: prompt }],
+      { temperature: 0.7, max_tokens: 4096 }
+    )
+
+    const data = extractJsonFromResponse(content)
+
+    const updated = await prisma.worldSetting.update({
+      where: { id: worldSetting.id },
+      data: {
+        name: data.name || worldSetting.name,
+        genre: data.genre || worldSetting.genre,
+        description: data.description || worldSetting.description,
+        timeSetting: data.timeSetting || worldSetting.timeSetting,
+        locationSetting: data.locationSetting || worldSetting.locationSetting,
+        socialStructure: data.socialStructure || worldSetting.socialStructure,
+        culturalRules: data.culturalRules || worldSetting.culturalRules,
+        magicOrTechSystem: data.magicOrTechSystem || worldSetting.magicOrTechSystem,
+      },
+    })
+
+    res.json(updated)
+  } catch (error) {
+    console.error('Generate world setting error:', error)
+    res.status(500).json({ message: '生成失败，请重试' })
+  }
+})
+
 export default router
