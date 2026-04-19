@@ -1017,17 +1017,21 @@ router.put('/world-settings/:id', async (req: AuthRequest, res) => {
 
     const { name, genre, description, timeSetting, locationSetting, socialStructure, culturalRules, magicOrTechSystem } = req.body
 
+    // Helper: only update if value is non-empty string
+    const keepExisting = (newVal: string | undefined, existing: string) =>
+      (!newVal || newVal.trim() === '') ? existing : newVal
+
     const updated = await prisma.worldSetting.update({
       where: { id: worldSetting.id },
       data: {
-        name: name ?? worldSetting.name,
-        genre: genre ?? worldSetting.genre,
-        description: description ?? worldSetting.description,
-        timeSetting: timeSetting ?? worldSetting.timeSetting,
-        locationSetting: locationSetting ?? worldSetting.locationSetting,
-        socialStructure: socialStructure ?? worldSetting.socialStructure,
-        culturalRules: culturalRules ?? worldSetting.culturalRules,
-        magicOrTechSystem: magicOrTechSystem ?? worldSetting.magicOrTechSystem,
+        name: keepExisting(name, worldSetting.name),
+        genre: keepExisting(genre, worldSetting.genre),
+        description: keepExisting(description, worldSetting.description),
+        timeSetting: keepExisting(timeSetting, worldSetting.timeSetting),
+        locationSetting: keepExisting(locationSetting, worldSetting.locationSetting),
+        socialStructure: keepExisting(socialStructure, worldSetting.socialStructure),
+        culturalRules: keepExisting(culturalRules, worldSetting.culturalRules),
+        magicOrTechSystem: keepExisting(magicOrTechSystem, worldSetting.magicOrTechSystem),
       },
     })
 
