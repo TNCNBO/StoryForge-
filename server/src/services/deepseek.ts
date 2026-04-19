@@ -30,7 +30,7 @@ export class DeepSeekClient {
   }
 
   async chat(messages: ChatMessage[], options: ChatOptions = {}): Promise<string> {
-    const { temperature = 0.7, max_tokens = 16384 } = options
+    const { temperature = 0.7, max_tokens = 8192 } = options
 
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), this.timeout)

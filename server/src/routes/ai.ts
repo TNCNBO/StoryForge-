@@ -277,7 +277,7 @@ ${charactersDesc || '（暂无角色设定，请根据类型自动设计）'}
 
     const content = await deepseekClient.chat(
       [{ role: 'user', content: prompt }],
-      { temperature: 0.7, max_tokens: 16384 }
+      { temperature: 0.7, max_tokens: 8192 }
     )
 
     const outlineData = extractJsonFromResponse(content)
@@ -421,7 +421,7 @@ ${context || '（无前文，这是第一章）'}
     const startTime = Date.now()
     const content = await deepseekClient.chat(
       [{ role: 'user', content: prompt }],
-      { temperature: 0.75, max_tokens: 16384 }
+      { temperature: 0.75, max_tokens: 8192 }
     )
     const generationTime = Date.now() - startTime
 
@@ -532,7 +532,7 @@ ${context}
         const startTime = Date.now()
         const content = await deepseekClient.chat(
           [{ role: 'user', content: prompt }],
-          { temperature: 0.75, max_tokens: 16384 }
+          { temperature: 0.75, max_tokens: 8192 }
         )
         const generationTime = Date.now() - startTime
 
