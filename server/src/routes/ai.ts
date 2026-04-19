@@ -18,22 +18,43 @@ function safeParseJson<T>(jsonString: string | null, fallback: T): T {
 
 // Helper: Extract JSON from AI response (handles markdown code blocks)
 function extractJsonFromResponse(content: string): any {
-  const trimmed = content.trim()
+  let text = content.trim()
+
   // Try direct parse first
   try {
-    return JSON.parse(trimmed)
+    return JSON.parse(text)
   } catch {
-    // Try to extract from markdown code block
-    const match = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/) ||
-                  trimmed.match(/\{[\s\S]*\}/)
-    if (match) {
-      try {
-        return JSON.parse(match[1] || match[0])
-      } catch {
-        throw new Error('无法解析AI返回的JSON格式')
+    // Try to strip markdown code block
+    if (text.startsWith('```')) {
+      // Find end of opening line
+      const firstNewline = text.indexOf('\n')
+      if (firstNewline > 0) {
+        text = text.substring(firstNewline + 1)
       }
+      // Remove closing ```
+      if (text.endsWith('```')) {
+        text = text.substring(0, text.length - 3)
+      } else if (text.endsWith('```\n')) {
+        text = text.substring(0, text.length - 4)
+      }
+      text = text.trim()
     }
-    throw new Error('AI返回内容不是有效的JSON格式')
+
+    // Try to find JSON object in remaining text
+    try {
+      return JSON.parse(text)
+    } catch {
+      // Try to extract JSON object using regex
+      const jsonMatch = text.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
+        try {
+          return JSON.parse(jsonMatch[0])
+        } catch {
+          throw new Error('无法解析AI返回的JSON格式')
+        }
+      }
+      throw new Error('AI返回内容不是有效的JSON格式')
+    }
   }
 }
 
